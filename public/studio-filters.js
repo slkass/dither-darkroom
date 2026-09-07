@@ -464,12 +464,20 @@ const Studio = (() => {
       ctx = context(out),
       w = out.width,
       h = out.height;
-    const bg = canvas(180, 320);
-    fit(context(bg), c, 0, 0, 180, 320);
-    const soft = blur(bg, Number(p.blur) / 3);
+    const liquid = p.material === 'liquid';
+    const sharpBackground = liquid && Number(p.blur) === 0;
+    const bg = canvas(
+      sharpBackground ? w : liquid ? 360 : 180,
+      sharpBackground ? h : liquid ? 640 : 320,
+    );
+    fit(context(bg), c, 0, 0, bg.width, bg.height);
+    const soft = blur(bg, Number(p.blur) / (liquid ? 8 : 3));
+    const backdrop = context(soft);
+    backdrop.fillStyle = liquid
+      ? 'rgba(237,237,243,.26)'
+      : 'rgba(237,237,237,.67)';
+    backdrop.fillRect(0, 0, soft.width, soft.height);
     ctx.drawImage(soft, 0, 0, w, h);
-    ctx.fillStyle = 'rgba(237,237,237,.67)';
-    ctx.fillRect(0, 0, w, h);
     const cw = (w * Number(p.size)) / 100,
       ch = cw * 1.62,
       cx = (w - cw) / 2,
@@ -477,9 +485,73 @@ const Studio = (() => {
       padding = cw * 0.07,
       cover = cw - padding * 2,
       left = cx + padding;
-    rounded(ctx, cx, cy, cw, ch, (cw * Number(p.roundness)) / 100);
-    ctx.fillStyle = `rgba(35,35,37,${Number(p.glass) / 100})`;
-    ctx.fill();
+    const radius = (cw * Number(p.roundness)) / 100;
+    if (liquid) {
+      ctx.save();
+      ctx.shadowColor = 'rgba(15,13,24,.28)';
+      ctx.shadowBlur = cw * 0.055;
+      ctx.shadowOffsetY = cw * 0.018;
+      rounded(ctx, cx, cy, cw, ch, radius);
+      ctx.fillStyle = 'rgba(20,20,30,.18)';
+      ctx.fill();
+      ctx.restore();
+      LiquidGlass.paint(
+        ctx,
+        soft,
+        { x: cx, y: cy, width: cw, height: ch, radius },
+        {
+          refraction: Number(p.refraction ?? 55),
+          thickness: Number(p.thickness ?? 35),
+          dispersion: Number(p.dispersion ?? 25),
+          highlight: Number(p.highlight ?? 65),
+          light: Number(p.light ?? -135),
+          tint: Number(p.glass),
+        },
+      );
+      // A thin reflective rim stays sharp at native export resolution.
+      ctx.save();
+      rounded(ctx, cx, cy, cw, ch, radius);
+      ctx.clip();
+      const angle = (Number(p.light ?? -135) * Math.PI) / 180;
+      const rim = ctx.createLinearGradient(
+        w / 2 + Math.cos(angle) * cw,
+        h / 2 + Math.sin(angle) * ch,
+        w / 2 - Math.cos(angle) * cw,
+        h / 2 - Math.sin(angle) * ch,
+      );
+      const highlight = Number(p.highlight ?? 65) / 100;
+      rim.addColorStop(0, `rgba(255,255,255,${0.85 * highlight})`);
+      rim.addColorStop(0.48, `rgba(255,255,255,${0.06 * highlight})`);
+      rim.addColorStop(1, `rgba(240,245,255,${0.5 * highlight})`);
+      ctx.strokeStyle = rim;
+      ctx.lineWidth = Math.max(0.7, cw * 0.004);
+      ctx.stroke();
+      ctx.restore();
+    } else {
+      rounded(ctx, cx, cy, cw, ch, radius);
+      ctx.fillStyle = `rgba(35,35,37,${Number(p.glass) / 100})`;
+      ctx.fill();
+    }
+    const region = backdrop.getImageData(
+      Math.floor(soft.width * 0.18),
+      Math.floor(soft.height * 0.56),
+      Math.max(1, Math.floor(soft.width * 0.64)),
+      Math.max(1, Math.floor(soft.height * 0.22)),
+    ).data;
+    let average = 0;
+    for (let i = 0; i < region.length; i += 4)
+      average += lum(region[i], region[i + 1], region[i + 2]);
+    average /= region.length / 4;
+    const tint = (Number(p.glass) / 100) * 0.55;
+    const darkText =
+      p.textTone === 'dark' ||
+      (p.textTone !== 'light' &&
+        liquid &&
+        average * (1 - tint) + 29 * tint > 140);
+    const foreground = darkText ? '#202127' : '#ffffff',
+      secondary = darkText ? '#4c4e58' : liquid ? '#e1e2e8' : '#c7c7c9';
+    const track = darkText ? '#686a7280' : '#bbbdbf',
+      trackActive = darkText ? '#343640' : '#fafafa';
     ctx.save();
     rounded(ctx, left, cy + padding, cover, cover, cw * 0.02);
     ctx.clip();
@@ -488,10 +560,10 @@ const Studio = (() => {
     const baseline = cy + padding + cover;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#c7c7c9';
+    ctx.fillStyle = secondary;
     ctx.font = `${cw * 0.033}px sans-serif`;
     ctx.fillText(p.device, left, baseline + cw * 0.065, cover);
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = foreground;
     ctx.font = `600 ${cw * 0.05}px sans-serif`;
     ctx.fillText(
       p.title,
@@ -509,11 +581,11 @@ const Studio = (() => {
         cw * 0.006,
       );
       ctx.fill();
-      ctx.fillStyle = '#555';
+      ctx.fillStyle = darkText ? '#f5f5f8' : '#555';
       ctx.font = `700 ${cw * 0.027}px sans-serif`;
       ctx.fillText('E', left + cover * 0.934, baseline + cw * 0.118);
     }
-    ctx.fillStyle = '#c7c7c9';
+    ctx.fillStyle = secondary;
     ctx.font = `${cw * 0.046}px sans-serif`;
     ctx.fillText(p.artist, left, baseline + cw * 0.173, cover);
     const time = (seconds) =>
@@ -528,14 +600,14 @@ const Studio = (() => {
     const trackX = left + cover * 0.13,
       trackW = cover * 0.73;
     rounded(ctx, trackX, py - cw * 0.007, trackW, cw * 0.014, cw);
-    ctx.fillStyle = '#bbbdbf';
+    ctx.fillStyle = track;
     ctx.fill();
     rounded(ctx, trackX, py - cw * 0.007, trackW * progress, cw * 0.014, cw);
-    ctx.fillStyle = '#fafafa';
+    ctx.fillStyle = trackActive;
     ctx.fill();
     const by = baseline + cw * 0.415,
       middle = w / 2;
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = foreground;
     for (const dx of [-0.018, 0.018]) {
       rounded(
         ctx,
@@ -561,10 +633,10 @@ const Studio = (() => {
     }
     const vy = baseline + cw * 0.56;
     rounded(ctx, left + cover * 0.1, vy, cover * 0.78, cw * 0.013, cw);
-    ctx.fillStyle = '#bcbec1';
+    ctx.fillStyle = darkText ? track : '#bcbec1';
     ctx.fill();
     rounded(ctx, left + cover * 0.1, vy, cover * 0.43, cw * 0.013, cw);
-    ctx.fillStyle = '#eeeeee';
+    ctx.fillStyle = darkText ? foreground : '#eeeeee';
     ctx.fill();
     // Speaker icons are paths so the exported image does not depend on emoji fonts.
     for (const x of [left + cover * 0.025, left + cover * 0.965]) {

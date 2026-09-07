@@ -406,7 +406,7 @@ export default function Home() {
     [edit, publish, registerAsset, releaseUnusedAsset],
   );
   useEffect(() => {
-    const worker = new Worker('/editor-worker.js?v=4');
+    const worker = new Worker('/editor-worker.js?v=5');
     workerRef.current = worker;
     worker.onmessage = (event) => {
       const m = event.data;
@@ -1441,17 +1441,35 @@ export default function Home() {
                   )}
                 </div>
               )}
-              {definition.fields.map((field) => (
-                <Control
-                  key={field.key}
-                  field={field}
-                  value={selected.params[field.key]}
-                  onChange={(value, draft) =>
-                    parameter(selected, field, value, draft)
-                  }
-                  onCommit={finish}
-                />
-              ))}
+              {selected.type === 'music' && (
+                <p className="helper">
+                  液态玻璃会折射卡片后的真实图像，高光与色散一起导出。降低背景模糊可更清楚地看到折射；也可切换经典磨砂材质。
+                </p>
+              )}
+              {definition.fields
+                .filter(
+                  (field) =>
+                    selected.type !== 'music' ||
+                    selected.params.material !== 'classic' ||
+                    ![
+                      'refraction',
+                      'thickness',
+                      'dispersion',
+                      'highlight',
+                      'light',
+                    ].includes(field.key),
+                )
+                .map((field) => (
+                  <Control
+                    key={field.key}
+                    field={field}
+                    value={selected.params[field.key]}
+                    onChange={(value, draft) =>
+                      parameter(selected, field, value, draft)
+                    }
+                    onCommit={finish}
+                  />
+                ))}
               {['text', 'sticker'].includes(selected.type) && (
                 <p className="helper">
                   位置和大小相对于这一层所在的画布。放在滤镜后面可保持图层本来的颜色。

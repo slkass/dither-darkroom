@@ -97,3 +97,9 @@ docker compose down
 在支持 `document.modelContext` 的浏览器中，页面还会提供读取编辑器状态与添加滤镜的 WebMCP 工具；不支持时不影响常规使用。
 
 `npm test` 检查网点、对比拖拽、历史分支、配色与原生 Canvas 叠加/编码。原生 Canvas 用于测试，不会打包进网页。
+
+## 液态玻璃来源
+
+iOS 专辑卡片默认使用 Liquid Glass 风格，也可切换经典磨砂材质。支持玻璃着色、折射、厚度、色散、镜面高光和光照方向，文字与控件可自动适配明暗。效果直接进入 PNG，不依赖网页 CSS 截图。它是网页端的风格实现，并非 Apple 原生系统组件。
+
+折射核心移植自 [Whynotmetoo/liquid-glass-canvas](https://github.com/Whynotmetoo/liquid-glass-canvas) 0.1.0 的 MIT 声明版本，固定提交 `b14d0b21b67102b5e70ab264d38535ab0f3d44fb`。`public/liquid-glass.js` 将其 shader 数学改为本地 CPU Canvas 渲染，并补充边缘抗锯齿、双线性采样和按图片尺寸缩放。每次复用 128 行的临时缓冲，以减少高清导出的额外内存。来源和许可说明位于 `public/licenses/liquid-glass-canvas.txt`。

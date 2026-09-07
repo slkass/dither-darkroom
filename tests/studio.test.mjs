@@ -31,7 +31,7 @@ const sandbox = vm.createContext({
   createImageBitmap: makeBitmap,
   console,
 });
-for (const file of ['processor.js', 'studio-filters.js'])
+for (const file of ['processor.js', 'liquid-glass.js', 'studio-filters.js'])
   vm.runInContext(
     fs.readFileSync(new URL('public/' + file, root), 'utf8'),
     sandbox,
@@ -109,6 +109,19 @@ test('native Canvas: all filters, ordered overlays, dimensions, JPEG and PNG', a
     assert.deepEqual(bytes(zero), originalBytes, type + ' zero strength');
     console.log('PASS', type, result.width + 'x' + result.height);
   }
+  const classic = node('music', { material: 'classic' });
+  const classicImage = await render([classic]);
+  delete classic.params.material;
+  assert.deepEqual(
+    bytes(classicImage),
+    bytes(await render([classic])),
+    'older cards retain classic material',
+  );
+  assert.notDeepEqual(
+    bytes(classicImage),
+    bytes(await render([node('music')])),
+    'liquid material produces a different exported card',
+  );
   const text = node('text', { text: 'TEST', size: 20, color: '#ff2020' }),
     threshold = node('threshold');
   assert.notDeepEqual(

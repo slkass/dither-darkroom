@@ -31,6 +31,38 @@ npm start
 
 `build` 生成 Cloudflare Workers 兼容的产物；`start` 使用 Wrangler 在本地运行构建结果。公开仓库的 `.openai/hosting.json` 不绑定任何已有的 Sites 项目。
 
+## FNOS / Docker 部署
+
+FNOS 安装并启用 Docker 后，将仓库下载到自己的 Docker 项目目录。在该目录执行：
+
+```sh
+docker compose up -d --build
+```
+
+浏览器打开 `http://你的FNOS地址:8098`。容器使用 Nginx 提供静态网页，包含健康检查，并随 Docker 自动恢复。镜像构建阶段需要访问 npm 和 Docker Hub。
+
+如需更换端口，在项目目录的 `.env` 文件写入 `DITHER_PORT=8099` 后重新启动。该配置文件已被 Git 忽略。
+
+如网络需要镜像代理，可在同一个 `.env` 文件中设置 `NGINX_IMAGE` 和 `NODE_IMAGE`，指定你使用的完整镜像地址；默认使用 Docker 官方镜像。
+
+也可以在电脑上构建好网页，再把 `dist/static` 和仓库一起复制到 NAS，减少 NAS 的构建负担：
+
+```sh
+npm ci
+npm run build:static
+docker compose -f compose.yaml -f compose.prebuilt.yaml up -d --build
+```
+
+这个方式只需要 NAS 拉取 Nginx 镜像。更新时重新构建并复制 `dist/static`，再运行相同的 Compose 命令。
+
+```sh
+docker compose ps
+docker compose logs --tail=50
+docker compose down
+```
+
+如配置反向代理，请把完整域名根路径指向该端口；目前资源使用根路径，不支持直接放到 `/dither/` 一类的子目录。
+
 ## 图片支持
 
 - JPG、PNG、WebP、AVIF、GIF、BMP，实际解码能力取决于浏览器。

@@ -1,0 +1,19 @@
+services:
+  dither-darkroom:
+    image: dither-darkroom:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NODE_IMAGE: "${NODE_IMAGE:-node:22-bookworm-slim}"
+        NGINX_IMAGE: "${NGINX_IMAGE:-nginx:stable-alpine}"
+    ports:
+      - "${DITHER_PORT:-8098}:80"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"

@@ -1,0 +1,4 @@
+services:
+  dither-darkroom:
+    build:
+      dockerfile: Dockerfile.prebuilt

@@ -44,8 +44,8 @@ const Studio = (() => {
         : Math.max(w / image.width, h / image.height)) *
         zoom) /
       100;
-    const dw = image.width * scale,
-      dh = image.height * scale;
+    const dw = mode === 'stretch' ? (w * zoom) / 100 : image.width * scale,
+      dh = mode === 'stretch' ? (h * zoom) / 100 : image.height * scale;
     ctx.save();
     ctx.beginPath();
     ctx.rect(x, y, w, h);
@@ -459,199 +459,307 @@ const Studio = (() => {
     });
   }
   function music(c, p) {
+    // One design coordinate system keeps every phone element proportional at export size.
     const edge = Math.max(c.width, c.height),
-      out = canvas((edge * 9) / 16, edge),
-      ctx = context(out),
-      w = out.width,
-      h = out.height;
-    const liquid = p.material === 'liquid';
-    const sharpBackground = liquid && Number(p.blur) === 0;
-    const bg = canvas(
-      sharpBackground ? w : liquid ? 360 : 180,
-      sharpBackground ? h : liquid ? 640 : 320,
-    );
-    fit(context(bg), c, 0, 0, bg.width, bg.height);
-    const soft = blur(bg, Number(p.blur) / (liquid ? 8 : 3));
-    const backdrop = context(soft);
-    backdrop.fillStyle = liquid
-      ? 'rgba(237,237,243,.26)'
-      : 'rgba(237,237,237,.67)';
-    backdrop.fillRect(0, 0, soft.width, soft.height);
-    ctx.drawImage(soft, 0, 0, w, h);
-    const cw = (w * Number(p.size)) / 100,
-      ch = cw * 1.62,
-      cx = (w - cw) / 2,
-      cy = (h - ch) / 2,
-      padding = cw * 0.07,
-      cover = cw - padding * 2,
-      left = cx + padding;
-    const radius = (cw * Number(p.roundness)) / 100;
-    if (liquid) {
-      ctx.save();
-      ctx.shadowColor = 'rgba(15,13,24,.28)';
-      ctx.shadowBlur = cw * 0.055;
-      ctx.shadowOffsetY = cw * 0.018;
-      rounded(ctx, cx, cy, cw, ch, radius);
-      ctx.fillStyle = 'rgba(20,20,30,.18)';
-      ctx.fill();
-      ctx.restore();
-      LiquidGlass.paint(
-        ctx,
-        soft,
-        { x: cx, y: cy, width: cw, height: ch, radius },
-        {
-          refraction: Number(p.refraction ?? 55),
-          thickness: Number(p.thickness ?? 35),
-          dispersion: Number(p.dispersion ?? 25),
-          highlight: Number(p.highlight ?? 65),
-          light: Number(p.light ?? -135),
-          tint: Number(p.glass),
-        },
-      );
-      // A thin reflective rim stays sharp at native export resolution.
-      ctx.save();
-      rounded(ctx, cx, cy, cw, ch, radius);
-      ctx.clip();
-      const angle = (Number(p.light ?? -135) * Math.PI) / 180;
-      const rim = ctx.createLinearGradient(
-        w / 2 + Math.cos(angle) * cw,
-        h / 2 + Math.sin(angle) * ch,
-        w / 2 - Math.cos(angle) * cw,
-        h / 2 - Math.sin(angle) * ch,
-      );
-      const highlight = Number(p.highlight ?? 65) / 100;
-      rim.addColorStop(0, `rgba(255,255,255,${0.85 * highlight})`);
-      rim.addColorStop(0.48, `rgba(255,255,255,${0.06 * highlight})`);
-      rim.addColorStop(1, `rgba(240,245,255,${0.5 * highlight})`);
-      ctx.strokeStyle = rim;
-      ctx.lineWidth = Math.max(0.7, cw * 0.004);
-      ctx.stroke();
-      ctx.restore();
-    } else {
-      rounded(ctx, cx, cy, cw, ch, radius);
-      ctx.fillStyle = `rgba(35,35,37,${Number(p.glass) / 100})`;
-      ctx.fill();
+      out = canvas((edge * 809) / 1771, edge),
+      ctx = context(out);
+    const w = out.width,
+      h = out.height,
+      s = w / 809,
+      liquid = p.material === 'liquid';
+    const desktop = canvas(360, 788),
+      dc = context(desktop),
+      ds = 360 / 809;
+    fit(dc, c, 0, 0, desktop.width, desktop.height);
+    dc.fillStyle = 'rgba(5,7,10,.76)';
+    dc.fillRect(0, 0, desktop.width, desktop.height);
+    if (p.desktop !== false) {
+      dc.save();
+      dc.scale(ds, ds);
+      const colors = [
+        '#a83966',
+        '#9a7518',
+        '#427b98',
+        '#624c8f',
+        '#216b63',
+        '#a45d34',
+        '#537846',
+        '#436498',
+      ];
+      for (let row = 0; row < 8; row++)
+        for (let column = 0; column < 4; column++) {
+          const x = 80 + column * 180,
+            y = 195 + row * 190;
+          rounded(dc, x, y, 110, 110, 26);
+          dc.fillStyle = colors[(row * 3 + column) % colors.length];
+          dc.fill();
+          dc.strokeStyle = '#ffffff65';
+          dc.lineWidth = 9;
+          if ((row + column) % 2) {
+            rounded(dc, x + 28, y + 28, 54, 54, 14);
+            dc.stroke();
+          } else {
+            dc.beginPath();
+            dc.arc(x + 55, y + 55, 26, 0, Math.PI * 2);
+            dc.stroke();
+          }
+        }
+      dc.restore();
     }
-    const region = backdrop.getImageData(
-      Math.floor(soft.width * 0.18),
-      Math.floor(soft.height * 0.56),
-      Math.max(1, Math.floor(soft.width * 0.64)),
-      Math.max(1, Math.floor(soft.height * 0.22)),
+    const soft = blur(
+      desktop,
+      Number(p.desktop !== false ? (p.desktopBlur ?? 55) : p.blur) * 0.18,
+    );
+    const bc = context(soft);
+    bc.fillStyle = 'rgba(0,0,0,.58)';
+    bc.fillRect(0, 0, soft.width, soft.height);
+    ctx.drawImage(soft, 0, 0, w, h);
+    const frosted = blur(soft, Number(p.blur) * 0.045),
+      fc = context(frosted);
+    fc.fillStyle = `rgba(210,213,218,${0.12 + Number(p.glass) * 0.0024})`;
+    fc.fillRect(0, 0, frosted.width, frosted.height);
+    const cs = (w * Number(p.size)) / 100 / 664,
+      cx = (w - 664 * cs) / 2;
+    const cy = Math.min(303 * s, h - (1185 + 32 + 91) * cs - 40 * s),
+      radius = (664 * cs * Number(p.roundness)) / 100;
+    function glass(x, y, width, height, r) {
+      ctx.save();
+      ctx.shadowColor = '#00000045';
+      ctx.shadowBlur = 26 * s;
+      ctx.shadowOffsetY = 8 * s;
+      rounded(ctx, x, y, width, height, r);
+      ctx.fillStyle = '#77777735';
+      ctx.fill();
+      ctx.restore();
+      if (liquid)
+        LiquidGlass.paint(
+          ctx,
+          frosted,
+          { x, y, width, height, radius: r },
+          {
+            refraction: Number(p.refraction ?? 55),
+            thickness: Number(p.thickness ?? 35),
+            dispersion: Number(p.dispersion ?? 25),
+            highlight: Number(p.highlight ?? 65),
+            light: Number(p.light ?? -135),
+            tint: Number(p.glass) * 0.25,
+          },
+        );
+      else {
+        ctx.save();
+        rounded(ctx, x, y, width, height, r);
+        ctx.clip();
+        ctx.drawImage(frosted, 0, 0, w, h);
+        ctx.restore();
+      }
+      rounded(ctx, x, y, width, height, r);
+      const rim = ctx.createLinearGradient(x, y, x + width, y + height);
+      rim.addColorStop(0, '#ffffff80');
+      rim.addColorStop(0.5, '#ffffff0b');
+      rim.addColorStop(1, '#ffffff70');
+      ctx.strokeStyle = rim;
+      ctx.lineWidth = 1.8 * s;
+      ctx.stroke();
+    }
+    const toneSample = fc.getImageData(
+      0,
+      Math.floor(frosted.height * 0.55),
+      frosted.width,
+      Math.max(1, Math.floor(frosted.height * 0.3)),
     ).data;
-    let average = 0;
-    for (let i = 0; i < region.length; i += 4)
-      average += lum(region[i], region[i + 1], region[i + 2]);
-    average /= region.length / 4;
-    const tint = (Number(p.glass) / 100) * 0.55;
+    let mean = 0;
+    for (let i = 0; i < toneSample.length; i += 4)
+      mean += lum(toneSample[i], toneSample[i + 1], toneSample[i + 2]);
     const darkText =
       p.textTone === 'dark' ||
-      (p.textTone !== 'light' &&
-        liquid &&
-        average * (1 - tint) + 29 * tint > 140);
-    const foreground = darkText ? '#202127' : '#ffffff',
-      secondary = darkText ? '#4c4e58' : liquid ? '#e1e2e8' : '#c7c7c9';
-    const track = darkText ? '#686a7280' : '#bbbdbf',
-      trackActive = darkText ? '#343640' : '#fafafa';
+      (p.textTone !== 'light' && mean / (toneSample.length / 4) > 155);
+    const foreground = darkText ? '#202127' : '#fafafa',
+      secondary = darkText ? '#4c4e58' : '#c5c5c8';
+    function eq(x, y, scale, color) {
+      ctx.fillStyle = color;
+      [4, 13, 25, 34, 31, 28].forEach((height, i) => {
+        rounded(
+          ctx,
+          x + i * 7 * scale,
+          y + ((34 - height) * scale) / 2,
+          4 * scale,
+          height * scale,
+          2 * scale,
+        );
+        ctx.fill();
+      });
+    }
+    if (p.dynamicIsland !== false) {
+      rounded(ctx, 208 * s, 31 * s, 391 * s, 82 * s, 41 * s);
+      ctx.fillStyle = '#000';
+      ctx.fill();
+      ctx.strokeStyle = '#323232';
+      ctx.lineWidth = 3 * s;
+      ctx.stroke();
+      ctx.save();
+      rounded(ctx, 229 * s, 49 * s, 46 * s, 46 * s, 12 * s);
+      ctx.clip();
+      fit(ctx, c, 229 * s, 49 * s, 46 * s, 46 * s);
+      ctx.restore();
+      eq(535 * s, 55 * s, s, '#7c7c84');
+    }
+    glass(cx, cy, 664 * cs, 1185 * cs, radius);
+    if (p.speakers !== false)
+      glass(w / 2 - 185 * cs, cy + 1217 * cs, 370 * cs, 91 * cs, 45.5 * cs);
     ctx.save();
-    rounded(ctx, left, cy + padding, cover, cover, cw * 0.02);
+    ctx.translate(cx, cy);
+    ctx.scale(cs, cs);
+    ctx.save();
+    rounded(ctx, 49, 49, 566, 566, 21);
     ctx.clip();
-    fit(ctx, c, left, cy + padding, cover, cover);
+    fit(ctx, c, 49, 49, 566, 566);
     ctx.restore();
-    const baseline = cy + padding + cover;
     ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = secondary;
-    ctx.font = `${cw * 0.033}px sans-serif`;
-    ctx.fillText(p.device, left, baseline + cw * 0.065, cover);
-    ctx.fillStyle = foreground;
-    ctx.font = `600 ${cw * 0.05}px sans-serif`;
-    ctx.fillText(
+    ctx.textBaseline = 'alphabetic';
+    function label(text, x, y, maxWidth, font, color) {
+      ctx.font = font;
+      ctx.fillStyle = color;
+      let result = String(text),
+        shortened = false;
+      while (
+        result.length &&
+        ctx.measureText(result + (shortened ? '…' : '')).width > maxWidth
+      ) {
+        result = result.slice(0, -1);
+        shortened = true;
+      }
+      ctx.fillText(result + (shortened ? '…' : ''), x, y);
+    }
+    label(
       p.title,
-      left,
-      baseline + cw * 0.118,
-      cover * (p.explicit ? 0.88 : 1),
+      49,
+      691,
+      p.explicit ? 420 : 470,
+      '600 31px Arial, sans-serif',
+      foreground,
     );
+    label(p.artist, 49, 730, 470, '30px Arial, sans-serif', secondary);
     if (p.explicit) {
-      rounded(
-        ctx,
-        left + cover * 0.93,
-        baseline + cw * 0.099,
-        cw * 0.032,
-        cw * 0.035,
-        cw * 0.006,
-      );
+      rounded(ctx, 490, 668, 22, 24, 4);
+      ctx.fillStyle = foreground;
       ctx.fill();
-      ctx.fillStyle = darkText ? '#f5f5f8' : '#555';
-      ctx.font = `700 ${cw * 0.027}px sans-serif`;
-      ctx.fillText('E', left + cover * 0.934, baseline + cw * 0.118);
+      ctx.font = '700 17px Arial, sans-serif';
+      ctx.fillStyle = '#555';
+      ctx.fillText('E', 495, 686);
     }
-    ctx.fillStyle = secondary;
-    ctx.font = `${cw * 0.046}px sans-serif`;
-    ctx.fillText(p.artist, left, baseline + cw * 0.173, cover);
-    const time = (seconds) =>
-        `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`,
-      py = baseline + cw * 0.265,
-      progress = Number(p.progress) / 100,
+    eq(553, 682, 1, foreground);
+    const progress = cap(Number(p.progress) / 100),
       duration = Number(p.duration);
-    ctx.font = `${cw * 0.03}px sans-serif`;
-    ctx.fillText(time(duration * progress), left, py);
+    function bar(x, y, width, value) {
+      rounded(ctx, x, y, width, 15, 7.5);
+      ctx.fillStyle = '#ffffff65';
+      ctx.fill();
+      ctx.save();
+      ctx.clip();
+      ctx.fillStyle = foreground;
+      ctx.fillRect(x, y, width * value, 15);
+      ctx.restore();
+    }
+    bar(49, 775, 566, progress);
+    const time = (seconds) =>
+      `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+    ctx.font = '24px Arial, sans-serif';
+    ctx.fillStyle = secondary;
+    ctx.fillText(time(duration * progress), 49, 829);
     ctx.textAlign = 'right';
-    ctx.fillText('-' + time(duration * (1 - progress)), left + cover, py);
-    const trackX = left + cover * 0.13,
-      trackW = cover * 0.73;
-    rounded(ctx, trackX, py - cw * 0.007, trackW, cw * 0.014, cw);
-    ctx.fillStyle = track;
-    ctx.fill();
-    rounded(ctx, trackX, py - cw * 0.007, trackW * progress, cw * 0.014, cw);
-    ctx.fillStyle = trackActive;
-    ctx.fill();
-    const by = baseline + cw * 0.415,
-      middle = w / 2;
+    ctx.fillText('−' + time(duration * (1 - progress)), 615, 829);
+    ctx.textAlign = 'left';
     ctx.fillStyle = foreground;
-    for (const dx of [-0.018, 0.018]) {
-      rounded(
-        ctx,
-        middle + cw * dx - cw * 0.009,
-        by - cw * 0.038,
-        cw * 0.018,
-        cw * 0.076,
-        cw * 0.004,
+    for (const x of [305, 338]) {
+      rounded(ctx, x, 869, 21, 70, 5);
+      ctx.fill();
+    }
+    function triangle(x, direction) {
+      ctx.beginPath();
+      ctx.moveTo(x - direction * 18, 881);
+      ctx.lineTo(x + direction * 18, 903);
+      ctx.lineTo(x - direction * 18, 925);
+      ctx.closePath();
+      ctx.fill();
+    }
+    for (const x of [179, 215]) triangle(x, -1);
+    for (const x of [448, 484]) triangle(x, 1);
+    bar(100, 1015, 446, cap(Number(p.volume ?? 30) / 100));
+    function speaker(x, waves) {
+      ctx.fillStyle = secondary;
+      ctx.beginPath();
+      ctx.moveTo(x, 1018);
+      ctx.lineTo(x + 7, 1018);
+      ctx.lineTo(x + 17, 1010);
+      ctx.lineTo(x + 17, 1035);
+      ctx.lineTo(x + 7, 1027);
+      ctx.lineTo(x, 1027);
+      ctx.closePath();
+      ctx.fill();
+      if (waves) {
+        ctx.strokeStyle = secondary;
+        ctx.lineWidth = 2.6;
+        for (const r of [12, 19, 26]) {
+          ctx.beginPath();
+          ctx.arc(x + 16, 1022, r, -0.65, 0.65);
+          ctx.stroke();
+        }
+      }
+    }
+    speaker(53, false);
+    speaker(573, true);
+    if (p.airplay !== false) {
+      rounded(ctx, 244, 1069, 175, 67, 33.5);
+      ctx.fillStyle = '#ffffff19';
+      ctx.fill();
+      ctx.strokeStyle = foreground;
+      ctx.lineWidth = 1.8;
+      for (const r of [5, 9, 13]) {
+        ctx.beginPath();
+        ctx.arc(282, 1101, r, Math.PI * 0.75, Math.PI * 2.25);
+        ctx.stroke();
+      }
+      ctx.fillStyle = foreground;
+      ctx.beginPath();
+      ctx.moveTo(282, 1101);
+      ctx.lineTo(274, 1115);
+      ctx.lineTo(290, 1115);
+      ctx.closePath();
+      ctx.fill();
+      ctx.font = '27px Arial, sans-serif';
+      ctx.fillText('AirPlay', 308, 1112);
+    }
+    if (p.speakers !== false) {
+      ctx.strokeStyle = secondary;
+      ctx.lineWidth = 3;
+      rounded(ctx, 193, 1248, 36, 24, 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(201, 1278);
+      ctx.lineTo(216, 1278);
+      ctx.stroke();
+      rounded(ctx, 219, 1260, 14, 21, 2);
+      ctx.fillStyle = foreground;
+      ctx.fill();
+      ctx.fillStyle = '#666';
+      for (const y of [1266, 1275]) {
+        ctx.beginPath();
+        ctx.arc(226, y, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      label(
+        'All Speakers & TVs',
+        249,
+        1272,
+        240,
+        '600 25px Arial, sans-serif',
+        foreground,
       );
-      ctx.fill();
     }
-    const triangle = (x, sign) => {
-      ctx.beginPath();
-      ctx.moveTo(x - sign * cw * 0.022, by - cw * 0.025);
-      ctx.lineTo(x + sign * cw * 0.022, by);
-      ctx.lineTo(x - sign * cw * 0.022, by + cw * 0.025);
-      ctx.closePath();
-      ctx.fill();
-    };
-    for (const sign of [-1, 1]) {
-      triangle(middle + sign * cw * 0.19, sign);
-      triangle(middle + sign * cw * 0.23, sign);
-    }
-    const vy = baseline + cw * 0.56;
-    rounded(ctx, left + cover * 0.1, vy, cover * 0.78, cw * 0.013, cw);
-    ctx.fillStyle = darkText ? track : '#bcbec1';
-    ctx.fill();
-    rounded(ctx, left + cover * 0.1, vy, cover * 0.43, cw * 0.013, cw);
-    ctx.fillStyle = darkText ? foreground : '#eeeeee';
-    ctx.fill();
-    // Speaker icons are paths so the exported image does not depend on emoji fonts.
-    for (const x of [left + cover * 0.025, left + cover * 0.965]) {
-      ctx.beginPath();
-      ctx.moveTo(x - cw * 0.013, vy);
-      ctx.lineTo(x - cw * 0.005, vy);
-      ctx.lineTo(x + cw * 0.006, vy - cw * 0.011);
-      ctx.lineTo(x + cw * 0.006, vy + cw * 0.024);
-      ctx.lineTo(x - cw * 0.005, vy + cw * 0.014);
-      ctx.lineTo(x - cw * 0.013, vy + cw * 0.014);
-      ctx.closePath();
-      ctx.fill();
-    }
+    ctx.restore();
     return out;
   }
+
   function dimensions(source, settings, maxSize = 0) {
     let ratio = source.width / source.height;
     if (settings.ratio !== 'original') {
@@ -752,6 +860,14 @@ const Studio = (() => {
       ctx.fillStyle = document.canvas.background;
       ctx.fillRect(0, 0, reference.width, reference.height);
       fit(ctx, source, 0, 0, reference.width, reference.height, 'contain');
+    }
+    if (
+      document.output &&
+      (document.output.ratio !== 'original' ||
+        Number(document.output.zoom) !== 100)
+    ) {
+      current = base(current, document.output, maxSize);
+      reference = base(reference, document.output, maxSize);
     }
     return { canvas: current, reference };
   }

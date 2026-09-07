@@ -7,6 +7,7 @@ import {
   Check,
   Copy,
   Expand,
+  GripVertical,
   ImagePlus,
   Layers,
   LoaderCircle,
@@ -35,7 +36,14 @@ import {
   commitHistory,
   jumpHistory,
   moveNode,
+  reorderNode,
 } from '@/lib/history.mjs';
+import {
+  packPreset,
+  validatePreset,
+  presetAssetIds,
+  PRESET_LIMITS,
+} from '@/lib/presets.mjs';
 import { extractPalette, paletteFromPrimary } from '@/lib/palette.mjs';
 import {
   blankDocument,
@@ -44,6 +52,7 @@ import {
   FILTERS,
   makeNode,
   newId,
+  OUTPUT_DEFAULTS,
   type Field,
   type Node,
   type Params,
@@ -201,7 +210,7 @@ export default function Home() {
   docRef.current = doc;
   const [selectedId, setSelectedId] = useState(''),
     [category, setCategory] = useState('dither'),
-    [view, setView] = useState('effect'),
+    [view, setView] = useState('compare'),
     [split, setSplit] = useState(50),
     [zoom, setZoom] = useState(false);
   const [working, setWorking] = useState(true),
@@ -233,6 +242,19 @@ export default function Home() {
     importTicket = useRef(0),
     transaction = useRef('');
   const historyTrack = useRef<HTMLElement>(null);
+  const [canvasScope, setCanvasScope] = useState<'output' | 'canvas'>('output');
+  const frame =
+    canvasScope === 'output' ? (doc.output ?? OUTPUT_DEFAULTS) : doc.canvas;
+  const [presetBusy, setPresetBusy] = useState(false),
+    presetRef = useRef<HTMLInputElement>(null);
+  const [deleteUndo, setDeleteUndo] = useState(false),
+    undoDeleteRef = useRef<History['entries'][number] | null>(null);
+  const [dragId, setDragId] = useState(''),
+    dragLayer = useRef('');
+  const [dropLayer, setDropLayer] = useState<{
+    id: string;
+    after: boolean;
+  } | null>(null);
   const comparisonDrag = useMemo(() => createComparisonDrag(setSplit), []);
   const source = assets.current.get(doc.sourceId),
     selected = doc.nodes.find((node) => node.id === selectedId),
@@ -241,6 +263,8 @@ export default function Home() {
     if (currentDocument(historyRef.current) !== currentDocument(next)) {
       revision.current++;
       pending.current = null;
+      undoDeleteRef.current = null;
+      setDeleteUndo(false);
     }
     historyRef.current = next;
     docRef.current = currentDocument(next);
@@ -352,10 +376,27 @@ export default function Home() {
           blob,
         };
       assets.current.set(id, asset);
-      await new Promise<void>((resolve, reject) => {
-        assetWaiters.current.set(id, { resolve, reject });
-        worker.postMessage({ type: 'asset', assetId: id, bitmap }, [bitmap]);
-      });
+      try {
+        await new Promise<void>((resolve, reject) => {
+          assetWaiters.current.set(id, { resolve, reject });
+          worker.postMessage({ type: 'asset', assetId: id, bitmap }, [bitmap]);
+        });
+      } catch (error) {
+        URL.revokeObjectURL(asset.url);
+        assets.current.delete(id);
+        assetWaiters.current.delete(id);
+        try {
+          bitmap.close();
+        } catch {
+          /* The bitmap may already be transferred. */
+        }
+        try {
+          worker.postMessage({ type: 'release-unused-asset', assetId: id });
+        } catch {
+          /* Preserve the registration error if the worker has stopped. */
+        }
+        throw error;
+      }
       setAssetTick((tick) => tick + 1);
       return asset;
     },
@@ -406,7 +447,7 @@ export default function Home() {
     [edit, publish, registerAsset, releaseUnusedAsset],
   );
   useEffect(() => {
-    const worker = new Worker('/editor-worker.js?v=5');
+    const worker = new Worker('/editor-worker.js?v=6');
     workerRef.current = worker;
     worker.onmessage = (event) => {
       const m = event.data;
@@ -547,13 +588,13 @@ export default function Home() {
   }, [load, navigate]);
   useEffect(() => {
     if (notice) {
-      const timer = setTimeout(() => setNotice(''), 5000);
+      const timer = setTimeout(() => setNotice(''), deleteUndo ? 10000 : 5000);
       return () => clearTimeout(timer);
     }
-  }, [notice]);
+  }, [notice, deleteUndo]);
   useEffect(() => {
-    if (doc.canvas.ratio !== 'original') setCustomRatio(doc.canvas.ratio);
-  }, [doc.canvas.ratio]);
+    if (frame.ratio !== 'original') setCustomRatio(frame.ratio);
+  }, [frame.ratio]);
   useEffect(() => {
     historyTrack.current
       ?.querySelector('[aria-current=step]')
@@ -749,6 +790,139 @@ export default function Home() {
     });
     return () => lifecycle.abort();
   }, [add]);
+  const removeLayer = (id: string) => {
+    const current = docRef.current,
+      index = current.nodes.findIndex((n) => n.id === id),
+      node = current.nodes[index];
+    if (!node) return;
+    edit(
+      (d) => ({ ...d, nodes: d.nodes.filter((n) => n.id !== id) }),
+      `删除 ${FILTERS[node.type].name}`,
+    );
+    if (selectedId === id)
+      setSelectedId(
+        current.nodes[index + 1]?.id ?? current.nodes[index - 1]?.id ?? '',
+      );
+    undoDeleteRef.current =
+      historyRef.current.entries[historyRef.current.cursor];
+    setDeleteUndo(true);
+    setNotice(`已删除 ${FILTERS[node.type].name}`);
+  };
+  const downloadPreset = async () => {
+    finish();
+    setPresetBusy(true);
+    setError('');
+    const document = structuredClone(docRef.current);
+    const attached = presetAssetIds(document).map((id: string) => {
+      const asset = assets.current.get(id);
+      return { id, blob: asset?.blob };
+    });
+    try {
+      const encoded = new Map();
+      let total = 0,
+        pixels = 0;
+      for (const asset of attached) {
+        if (!asset.blob) throw new Error('贴图资源不可用，请重新添加贴图。');
+        total += asset.blob.size;
+        const dimensions = assets.current.get(asset.id);
+        pixels += (dimensions?.width ?? 0) * (dimensions?.height ?? 0);
+        if (total > PRESET_LIMITS.assetBytes || pixels > PRESET_LIMITS.pixels)
+          throw new Error(
+            '预设贴图总量超过 48 MB 或 4800 万像素，请缩小贴图后再导出。',
+          );
+        const data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result).split(',')[1]);
+          reader.onerror = () => reject(new Error('读取贴图失败'));
+          reader.readAsDataURL(asset.blob!);
+        });
+        encoded.set(asset.id, { mime: asset.blob.type, data });
+      }
+      const preset = packPreset(document, encoded);
+      validatePreset(preset, FILTERS);
+      const blob = new Blob([JSON.stringify(preset)], {
+        type: 'application/json',
+      });
+      if (blob.size > PRESET_LIMITS.fileBytes)
+        throw new Error('预设超过 64 MB，请减少贴图后重试。');
+      const url = URL.createObjectURL(blob),
+        link = window.document.createElement('a');
+      link.href = url;
+      link.download = 'darkroom-preset.json';
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      setNotice('预设已导出 · 含画布、效果与贴图');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '预设导出失败');
+    } finally {
+      setPresetBusy(false);
+    }
+  };
+  const importPreset = async (file: File) => {
+    finish();
+    const started = revision.current,
+      sourceId = docRef.current.sourceId;
+    if (!sourceId) {
+      setError('请先载入原图。');
+      return;
+    }
+    setPresetBusy(true);
+    setError('');
+    const staged: Asset[] = [];
+    try {
+      if (file.size > PRESET_LIMITS.fileBytes)
+        throw new Error('预设文件不能超过 64 MB。');
+      const preset = validatePreset(JSON.parse(await file.text()), FILTERS),
+        aliases = new Map<string, string>();
+      let pixels = 0;
+      for (const [alias, raw] of Object.entries(preset.assets)) {
+        if (revision.current !== started)
+          throw new Error('作品已发生变化，本次预设导入已取消，请重试。');
+        const encoded = raw as { mime: string; data: string },
+          data = atob(encoded.data),
+          bytes = Uint8Array.from(data, (char) => char.charCodeAt(0));
+        const asset = await registerAsset(
+          new Blob([bytes], { type: encoded.mime }),
+          `预设贴图 ${staged.length + 1}`,
+        );
+        staged.push(asset);
+        pixels += asset.width * asset.height;
+        if (pixels > PRESET_LIMITS.pixels)
+          throw new Error('预设贴图总像素超过 4800 万，请缩小贴图。');
+        aliases.set(alias, asset.id);
+      }
+      if (revision.current !== started || sourceId !== docRef.current.sourceId)
+        throw new Error('作品已发生变化，本次预设导入已取消，请重试。');
+      const nodes: Node[] = preset.nodes.map((node: Node) => ({
+        ...node,
+        id: newId(),
+        params: {
+          ...node.params,
+          ...(node.params.assetId
+            ? { assetId: aliases.get(String(node.params.assetId))! }
+            : {}),
+        },
+      }));
+      edit(
+        (d) => ({ ...d, canvas: preset.canvas, output: preset.output, nodes }),
+        '导入效果预设',
+      );
+      setSelectedId(nodes[0]?.id ?? '');
+      setNotice(`已导入 ${nodes.length} 个效果层 · 可撤销`);
+    } catch (error) {
+      staged.forEach(releaseUnusedAsset);
+      setError(
+        error instanceof SyntaxError
+          ? '预设不是有效的 JSON 文件。'
+          : error instanceof Error
+            ? error.message
+            : '导入失败，当前作品已保留。',
+      );
+    } finally {
+      setPresetBusy(false);
+    }
+  };
+
   const changeCanvas = (
     key: keyof StudioDocument['canvas'],
     value: string | number,
@@ -757,11 +931,14 @@ export default function Home() {
     edit(
       (document) => ({
         ...document,
-        canvas: { ...document.canvas, [key]: value },
+        [canvasScope]: {
+          ...(document[canvasScope] ?? OUTPUT_DEFAULTS),
+          [key]: value,
+        },
       }),
-      '调整画布',
+      canvasScope === 'output' ? '调整最终画布' : '调整原图构图',
       draft,
-      'canvas-' + key,
+      canvasScope + key,
     );
   return (
     <main
@@ -833,6 +1010,16 @@ export default function Home() {
         accept="image/jpeg,image/png,image/webp,image/avif,image/gif,image/bmp"
         onChange={(e) => {
           if (e.target.files?.[0]) void addSticker(e.target.files[0]);
+          e.target.value = '';
+        }}
+      />
+      <input
+        ref={presetRef}
+        type="file"
+        className="sr-only"
+        accept=".json,application/json"
+        onChange={(e) => {
+          if (e.target.files?.[0]) void importPreset(e.target.files[0]);
           e.target.value = '';
         }}
       />
@@ -923,13 +1110,45 @@ export default function Home() {
               </TabsContent>
             ))}
           </Tabs>
+          <div className="preset-transfer">
+            <button
+              disabled={!source || presetBusy || loading}
+              onClick={() => presetRef.current?.click()}
+            >
+              导入预设
+            </button>
+            <button
+              disabled={!source || presetBusy || loading}
+              onClick={() => void downloadPreset()}
+            >
+              {presetBusy ? '正在处理…' : '导出预设'}
+            </button>
+          </div>
+          <p className="helper preset-help">
+            保存效果、画布和贴图；导入时保留当前原图。可通过历史撤销。
+          </p>
           <details
             className="canvas-settings"
             open={category === 'basic' ? true : undefined}
           >
             <summary>
-              画布与裁切 <span>Aspect ratio</span>
+              画布与适配 <span>Aspect ratio</span>
             </summary>
+            <div className="control">
+              <label className="field-label">调整对象</label>
+              <Choice
+                label="调整对象"
+                value={canvasScope}
+                items={[
+                  ['output', '最终作品 · 效果完成后'],
+                  ['canvas', '原图构图 · 效果开始前'],
+                ]}
+                onChange={(v) => {
+                  finish();
+                  setCanvasScope(v as 'output' | 'canvas');
+                }}
+              />
+            </div>
             <div className="control">
               <label className="field-label">画布比例</label>
               <Choice
@@ -943,18 +1162,20 @@ export default function Home() {
                     '9:16',
                     '16:9',
                     '4:3',
-                  ].includes(doc.canvas.ratio)
-                    ? doc.canvas.ratio
+                    '3:2',
+                  ].includes(frame.ratio)
+                    ? frame.ratio
                     : 'custom'
                 }
                 items={[
-                  ['original', '原图比例'],
+                  ['original', '保持当前作品比例'],
                   ['1:1', '1 : 1'],
                   ['4:5', '4 : 5'],
                   ['3:4', '3 : 4'],
                   ['9:16', '9 : 16'],
                   ['16:9', '16 : 9'],
                   ['4:3', '4 : 3'],
+                  ['3:2', '3 : 2'],
                   ['custom', '自定义比例'],
                 ]}
                 onChange={(v) => {
@@ -965,9 +1186,16 @@ export default function Home() {
                 }}
               />
             </div>
-            {!['original', '1:1', '4:5', '3:4', '9:16', '16:9', '4:3'].includes(
-              doc.canvas.ratio,
-            ) && (
+            {![
+              'original',
+              '1:1',
+              '4:5',
+              '3:4',
+              '9:16',
+              '16:9',
+              '4:3',
+              '3:2',
+            ].includes(frame.ratio) && (
               <div className="custom-ratio">
                 <input
                   aria-label="自定义比例，例如 5:4"
@@ -1004,17 +1232,18 @@ export default function Home() {
                 label: '图片适配',
                 kind: 'select',
                 options: [
-                  ['cover', '填满画布 / 裁切'],
-                  ['contain', '完整图片 / 留边'],
+                  ['contain', '完整留边 · 不裁剪'],
+                  ['stretch', '拉伸填满 · 可变形'],
+                  ['cover', '裁切填满'],
                 ],
               }}
-              value={doc.canvas.fit}
+              value={frame.fit}
               onChange={(v) => changeCanvas('fit', String(v))}
               onCommit={finish}
             />
             <Control
               field={{ key: 'background', label: '画布底色', kind: 'color' }}
-              value={doc.canvas.background}
+              value={frame.background}
               onChange={(v, draft) =>
                 changeCanvas('background', String(v), draft)
               }
@@ -1022,21 +1251,22 @@ export default function Home() {
             />
             {(
               [
-                ['zoom', '图片缩放', 100, 300],
-                ['offsetX', '水平裁切', 0, 100],
-                ['offsetY', '垂直裁切', 0, 100],
+                ['zoom', '图片缩放', 10, 300],
+                ['offsetX', '水平位置', 0, 100],
+                ['offsetY', '垂直位置', 0, 100],
               ] as const
             ).map(([key, label, min, max]) => (
               <Control
                 key={key}
                 field={{ key, label, kind: 'number', min, max, unit: '%' }}
-                value={doc.canvas[key]}
+                value={frame[key]}
                 onChange={(v, draft) => changeCanvas(key, Number(v), draft)}
                 onCommit={finish}
               />
             ))}
             <p className="helper">
-              保留原图长边，按比例裁切或留边。海报与专辑卡片会建立自己的版面比例。
+              最终画布在全部效果之后适配，专辑卡片也可完整留边或拉伸。缩放 100%
+              保留全图；原图构图则在效果之前应用。
             </p>
           </details>
           <button
@@ -1209,9 +1439,73 @@ export default function Home() {
           <div className="layer-stack">
             {doc.nodes.map((node, index) => (
               <div
-                className={`layer-row ${selectedId === node.id ? 'selected' : ''} ${node.enabled ? '' : 'muted-layer'}`}
+                className={`layer-row ${selectedId === node.id ? 'selected' : ''} ${node.enabled ? '' : 'muted-layer'} ${dragId === node.id ? 'dragging-layer' : ''} ${dropLayer?.id === node.id ? (dropLayer.after ? 'drop-after' : 'drop-before') : ''}`}
                 key={node.id}
+                onDragOver={(event) => {
+                  if (
+                    !dragLayer.current ||
+                    !event.dataTransfer.types.includes(
+                      'application/x-darkroom-layer',
+                    )
+                  )
+                    return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  event.dataTransfer.dropEffect = 'move';
+                  const bounds = event.currentTarget.getBoundingClientRect();
+                  setDropLayer({
+                    id: node.id,
+                    after: event.clientY > bounds.top + bounds.height / 2,
+                  });
+                  const stack = event.currentTarget.parentElement!;
+                  const rect = stack.getBoundingClientRect();
+                  if (event.clientY < rect.top + 36) stack.scrollTop -= 12;
+                  else if (event.clientY > rect.bottom - 36)
+                    stack.scrollTop += 12;
+                }}
+                onDrop={(event) => {
+                  if (!dragLayer.current) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const bounds = event.currentTarget.getBoundingClientRect();
+                  const after = event.clientY > bounds.top + bounds.height / 2,
+                    id = dragLayer.current;
+                  edit((d) => {
+                    const index = d.nodes.findIndex((n) => n.id === node.id);
+                    return reorderNode(
+                      d,
+                      id,
+                      after ? (d.nodes[index + 1]?.id ?? null) : node.id,
+                    );
+                  }, '拖拽排列图层');
+                  dragLayer.current = '';
+                  setDragId('');
+                  setDropLayer(null);
+                }}
               >
+                <button
+                  className="layer-drag"
+                  draggable
+                  title="拖拽排序；也可使用右侧上下移按钮"
+                  aria-label={`拖拽第 ${index + 1} 层 ${FILTERS[node.type].name}`}
+                  onDragStart={(event) => {
+                    finish();
+                    dragLayer.current = node.id;
+                    setDragId(node.id);
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData(
+                      'application/x-darkroom-layer',
+                      node.id,
+                    );
+                  }}
+                  onDragEnd={() => {
+                    dragLayer.current = '';
+                    setDragId('');
+                    setDropLayer(null);
+                  }}
+                >
+                  <GripVertical size={15} />
+                </button>
                 <Switch
                   size="sm"
                   aria-label={`${node.enabled ? '停用' : '启用'}第 ${index + 1} 层 ${FILTERS[node.type].name}`}
@@ -1262,6 +1556,14 @@ export default function Home() {
                     <ArrowDown size={13} />
                   </button>
                 </span>
+                <button
+                  className="layer-delete"
+                  title="删除此效果层 · 可撤销"
+                  aria-label={`删除第 ${index + 1} 层 ${FILTERS[node.type].name}`}
+                  onClick={() => removeLayer(node.id)}
+                >
+                  <Trash2 size={14} />
+                </button>
               </div>
             ))}
             {!doc.nodes.length && (
@@ -1331,23 +1633,7 @@ export default function Home() {
                     className="icon-button"
                     title="删除图层"
                     aria-label="删除图层"
-                    onClick={() => {
-                      const index = doc.nodes.findIndex(
-                        (n) => n.id === selected.id,
-                      );
-                      edit(
-                        (d) => ({
-                          ...d,
-                          nodes: d.nodes.filter((n) => n.id !== selected.id),
-                        }),
-                        '删除图层',
-                      );
-                      setSelectedId(
-                        doc.nodes[index - 1]?.id ??
-                          doc.nodes[index + 1]?.id ??
-                          '',
-                      );
-                    }}
+                    onClick={() => removeLayer(selected.id)}
                   >
                     <Trash2 size={14} />
                   </button>
@@ -1552,6 +1838,24 @@ export default function Home() {
         <div className="toast" role="status">
           <Check size={16} />
           {notice}
+          {deleteUndo && notice.startsWith('已删除') && (
+            <button
+              className="toast-action"
+              onClick={() => {
+                if (
+                  historyRef.current.entries[historyRef.current.cursor] ===
+                    undoDeleteRef.current &&
+                  !historyRef.current.draft
+                ) {
+                  navigate('undo');
+                  setNotice('已恢复删除的效果层');
+                }
+              }}
+            >
+              <Undo2 size={14} />
+              撤销删除
+            </button>
+          )}
         </div>
       )}
     </main>

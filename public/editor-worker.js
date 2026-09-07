@@ -1,7 +1,7 @@
 importScripts(
   '/processor.js?v=4',
   '/liquid-glass.js?v=5',
-  '/studio-filters.js?v=5',
+  '/studio-filters.js?v=6',
 );
 const studioAssets = new Map();
 let studioQueue = Promise.resolve();

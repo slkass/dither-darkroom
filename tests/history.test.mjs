@@ -7,6 +7,7 @@ import {
   commitHistory,
   jumpHistory,
   moveNode,
+  reorderNode,
 } from '../lib/history.mjs';
 import { paletteFromPrimary, extractPalette } from '../lib/palette.mjs';
 const source = {
@@ -17,6 +18,49 @@ const source = {
     { id: 'second', params: {} },
   ],
 };
+test('dragging commits one reorder, no-op drops do not create history, deletion remains reversible', () => {
+  const doc = {
+    ...source,
+    nodes: [...source.nodes, { id: 'third', params: {} }],
+  };
+  let history = createHistory(doc);
+  for (const before of ['first', 'second']) {
+    history = commitHistory(
+      stageHistory(
+        history,
+        reorderNode(currentDocument(history), 'first', before),
+        'drop',
+      ),
+    );
+    assert.equal(history.entries.length, 1);
+  }
+  history = commitHistory(
+    stageHistory(
+      history,
+      reorderNode(currentDocument(history), 'first', null),
+      'drop',
+    ),
+  );
+  assert.equal(history.entries.length, 2);
+  assert.deepEqual(
+    currentDocument(history).nodes.map((n) => n.id),
+    ['second', 'third', 'first'],
+  );
+  assert.deepEqual(currentDocument(jumpHistory(history, 0)), doc);
+  assert.equal(reorderNode(doc, 'missing', 'first'), doc);
+  assert.equal(reorderNode(doc, 'first', 'missing'), doc);
+  const deleted = {
+    ...currentDocument(history),
+    nodes: currentDocument(history).nodes.filter((n) => n.id !== 'third'),
+  };
+  history = commitHistory(stageHistory(history, deleted, 'delete'));
+  assert.equal(
+    currentDocument(jumpHistory(history, 1)).nodes.find((n) => n.id === 'third')
+      .id,
+    'third',
+  );
+  assert.deepEqual(currentDocument(jumpHistory(history, 2)), deleted);
+});
 test('a continuous gesture commits once and restores exact settings on undo/redo', () => {
   let history = createHistory(source);
   for (let value = 1; value <= 100; value++)

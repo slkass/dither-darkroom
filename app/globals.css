@@ -626,6 +626,70 @@ textarea {
   scrollbar-width: thin;
   scrollbar-color: #624273 transparent;
 }
+.preset-transfer {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 22px;
+}
+.preset-transfer button {
+  border: 1px solid #393441;
+  border-radius: 7px;
+  background: #211e29;
+  color: #ded7ea;
+  padding: 10px 6px;
+  font-size: 12px;
+}
+.preset-help {
+  margin-bottom: 18px;
+}
+.layer-drag,
+.layer-delete {
+  display: grid;
+  place-items: center;
+  padding: 3px;
+  border: 0;
+  background: transparent;
+  color: #9791a4;
+  flex-shrink: 0;
+}
+.layer-drag {
+  cursor: grab;
+  touch-action: auto;
+}
+.layer-drag:active {
+  cursor: grabbing;
+}
+.layer-delete {
+  min-width: 25px;
+  min-height: 32px;
+  border-radius: 5px;
+}
+.layer-delete:hover {
+  color: #ffadb5;
+  background: #552735;
+}
+.layer-row.dragging-layer {
+  opacity: 0.45;
+}
+.layer-row.drop-before {
+  box-shadow: 0 -3px 0 #b99af7;
+}
+.layer-row.drop-after {
+  box-shadow: 0 3px 0 #b99af7;
+}
+.toast .toast-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #e5d4ff;
+  background: #ffffff10;
+  border: 1px solid #9a79bd66;
+  border-radius: 5px;
+  padding: 5px 8px;
+  margin-left: 8px;
+  white-space: nowrap;
+}
 .layer-row {
   display: flex;
   gap: 7px;

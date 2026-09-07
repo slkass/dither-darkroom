@@ -163,7 +163,7 @@ test('native Canvas: all filters, ordered overlays, dimensions, JPEG and PNG', a
     node('wanted'),
     node('music', { title: 'DARKROOM', artist: 'Image Lab' }),
   ]);
-  assert.ok(Math.abs(combined.width / combined.height - 9 / 16) < 0.01);
+  assert.ok(Math.abs(combined.width / combined.height - 809 / 1771) < 0.01);
   const blob = await combined.convertToBlob({ type: 'image/png' }),
     encoded = await makeBitmap(blob);
   assert.equal(encoded.width, combined.width);
@@ -183,6 +183,67 @@ test('native Canvas: all filters, ordered overlays, dimensions, JPEG and PNG', a
   assert.notDeepEqual(bytes(native.canvas), bytes(small.canvas));
   const { newId } = catalog.exports;
   assert.equal(new Set(Array.from({ length: 100 }, () => newId())).size, 100);
+});
+
+test('final canvas contains or stretches the entire phone composition after all effects', async () => {
+  const output = { ...catalog.exports.OUTPUT_DEFAULTS, ratio: '3:2' };
+  const doc = { ...base, nodes: [node('music')], output };
+  const contained = await Studio.render(doc, assets, 0);
+  const stretched = await Studio.render(
+    { ...doc, output: { ...output, fit: 'stretch' } },
+    assets,
+    0,
+  );
+  for (const result of [contained, stretched]) {
+    assert.equal(result.canvas.width, 320);
+    assert.equal(result.canvas.height, 213);
+    assert.equal(result.reference.width, 320);
+    assert.equal(result.reference.height, 213);
+  }
+  assert.notDeepEqual(bytes(contained.canvas), bytes(stretched.canvas));
+  const p = contained.canvas.getContext('2d').getImageData(0, 106, 1, 1).data;
+  assert.deepEqual(
+    Array.from(p),
+    [13, 13, 16, 255],
+    'contain keeps letterbox color',
+  );
+  const phone = await render([node('music')]);
+  for (const toggle of ['dynamicIsland', 'desktop', 'airplay', 'speakers']) {
+    assert.notDeepEqual(
+      bytes(phone),
+      bytes(await render([node('music', { [toggle]: false })])),
+      toggle + ' affects exported pixels',
+    );
+  }
+  const decode = await makeBitmap(
+    await stretched.canvas.convertToBlob({ type: 'image/png' }),
+  );
+  assert.equal(decode.width, 320);
+  assert.equal(decode.height, 213);
+  const corners = canvasFactory(4, 2),
+    cx = corners.getContext('2d');
+  for (const [x, y, color] of [
+    [0, 0, '#ff0000'],
+    [2, 0, '#00ff00'],
+    [0, 1, '#0000ff'],
+    [2, 1, '#ffffff'],
+  ]) {
+    cx.fillStyle = color;
+    cx.fillRect(x, y, 2, 1);
+  }
+  for (const fit of ['contain', 'stretch']) {
+    const square = canvasFactory(8, 8),
+      sx = square.getContext('2d');
+    sx.imageSmoothingEnabled = false;
+    Studio.fit(sx, corners, 0, 0, 8, 8, fit);
+    const pixel = (x, y) => Array.from(sx.getImageData(x, y, 1, 1).data);
+    const top = fit === 'contain' ? 2 : 0,
+      bottom = fit === 'contain' ? 5 : 7;
+    assert.deepEqual(pixel(0, top), [255, 0, 0, 255]);
+    assert.deepEqual(pixel(7, top), [0, 255, 0, 255]);
+    assert.deepEqual(pixel(0, bottom), [0, 0, 255, 255]);
+    assert.deepEqual(pixel(7, bottom), [255, 255, 255, 255]);
+  }
 });
 
 test('worker serializes jobs and preserves request identities after an error', async () => {

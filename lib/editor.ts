@@ -5,16 +5,26 @@ export type Node = {
   enabled: boolean;
   params: Params;
 };
+export type Frame = {
+  ratio: string;
+  fit: string;
+  background: string;
+  offsetX: number;
+  offsetY: number;
+  zoom: number;
+};
+export const OUTPUT_DEFAULTS: Frame = {
+  ratio: 'original',
+  fit: 'contain',
+  background: '#0d0d10',
+  offsetX: 50,
+  offsetY: 50,
+  zoom: 100,
+};
 export type StudioDocument = {
   sourceId: string;
-  canvas: {
-    ratio: string;
-    fit: string;
-    background: string;
-    offsetX: number;
-    offsetY: number;
-    zoom: number;
-  };
+  canvas: Frame;
+  output?: Frame;
   nodes: Node[];
 };
 export type Field = {
@@ -299,13 +309,12 @@ export const FILTERS: Record<string, Definition> = {
     defaults: {
       title: 'Untitled',
       artist: 'Unknown Artist',
-      device: 'iPhone',
       progress: 48,
       duration: 180,
       glass: 58,
       blur: 65,
-      size: 84,
-      roundness: 12,
+      size: 82,
+      roundness: 14,
       explicit: false,
       material: 'liquid',
       refraction: 55,
@@ -314,6 +323,12 @@ export const FILTERS: Record<string, Definition> = {
       highlight: 65,
       light: -135,
       textTone: 'auto',
+      dynamicIsland: true,
+      desktop: true,
+      desktopBlur: 55,
+      airplay: true,
+      speakers: true,
+      volume: 30,
     },
     fields: [
       select('material', '卡片材质', [
@@ -322,7 +337,12 @@ export const FILTERS: Record<string, Definition> = {
       ]),
       text('title', '专辑 / 歌曲名'),
       text('artist', '艺术家'),
-      text('device', '设备文字'),
+      toggle('dynamicIsland', '灵动岛'),
+      toggle('desktop', '模拟桌面图标背景'),
+      number('desktopBlur', '桌面虚化'),
+      toggle('airplay', 'AirPlay 按钮'),
+      toggle('speakers', '扬声器与电视按钮'),
+      number('volume', '音量位置'),
       number('progress', '播放进度'),
       number('duration', '总时长', 30, 600, ' 秒'),
       number('glass', '玻璃着色 · 清透 → 深色'),
@@ -409,6 +429,7 @@ export const makeNode = (type: string): Node => ({
 });
 export const blankDocument = (): StudioDocument => ({
   sourceId: '',
+  output: { ...OUTPUT_DEFAULTS },
   canvas: {
     ratio: 'original',
     fit: 'cover',

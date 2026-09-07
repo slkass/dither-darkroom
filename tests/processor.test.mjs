@@ -8,7 +8,7 @@ const context = vm.createContext({
   ImageData: class { constructor(width,height) { this.width=width;this.height=height;this.data=new Uint8ClampedArray(width*height*4); } },
   OffscreenCanvas: class { constructor(width,height){this.width=width;this.height=height;} getContext(){return {putImageData:image=>{this.image=image;}};} },
 });
-vm.runInContext(await fs.readFile(new URL('../public/processor.js',import.meta.url),'utf8')+'\nglobalThis.render=processImage;',context);
+vm.runInContext(await fs.readFile(new URL('../public/processor.js',import.meta.url),'utf8')+'\nglobalThis.render=processImage;globalThis.shapeContains=shapeContains;',context);
 const settings={pattern:'tonal',cell:4,coverage:50,lift:0,contrast:100,texture:100,fade:0,start:15,brightness:100,color:'#8a76e9',background:'#050508'};
 function render(tone,overrides={},width=1200,height=16){
   const data=new Uint8ClampedArray(width*height*4);
@@ -44,4 +44,25 @@ test('zero texture ignores screen structure; fade is applied after screening',()
 test('pattern scale follows output dimensions',()=>{
   const normal=render(64),large=render(64,{},2400,32);
   for(let y=0;y<16;y+=3)for(let x=0;x<1200;x+=17)for(let c=0;c<4;c++)assert.equal(normal.data[(y*1200+x)*4+c],large.data[(y*2*2400+x*2)*4+c]);
+});
+test('geometric masks distinguish cardinal crosses, diagonal crosses and solid dots',()=>{
+  const hit=context.shapeContains;
+  assert(hit('cross',4,0,5,.2));assert(!hit('cross',3,3,5,.2));
+  assert(hit('x',3,3,5,.2));assert(!hit('x',4,0,5,.2));
+  assert(hit('circle',3,3,5,.2));assert(!hit('circle',4,4,5,.2));
+  assert(hit('square',4,4,5,.2));assert(!hit('diamond',4,4,5,.2));
+  assert(hit('lines',100,0,5,.2));assert(!hit('lines',0,2,5,.2));
+  for(const shape of ['cross','x','circle','square','diamond','lines'])assert(!hit(shape,0,0,0,.2));
+});
+test('shape controls alter spacing, stroke and rotation independently',()=>{
+  const baseline=render(180,{pattern:'cross'},1200,48);
+  assert.notDeepEqual(baseline.data,render(180,{pattern:'cross',spacing:180},1200,48).data);
+  assert.notDeepEqual(baseline.data,render(180,{pattern:'cross',stroke:80},1200,48).data);
+  assert.notDeepEqual(baseline.data,render(180,{pattern:'cross',rotation:45},1200,48).data);
+});
+test('gradient direction, vignette and deterministic grain behave independently',()=>{
+  const up=render(255,{fade:100,fadeDirection:'up'},1200,48);assert(up.data.slice(0,1200*4).every((v,i)=>i%4===3?v===255:v===0));
+  const left=render(255,{fade:100,fadeDirection:'left'},1200,48);assert.equal(left.data[0],0);
+  const vignette=render(255,{vignette:100},1200,48);assert.equal(vignette.data[0],0);
+  const noise=render(150,{grain:30});assert.deepEqual(noise.data,render(150,{grain:30}).data);assert.notDeepEqual(noise.data,render(150).data);
 });

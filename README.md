@@ -21,7 +21,7 @@
 需要 Node.js 22.13 或更新版本，以及 npm。
 
 ```sh
-git clone https://github.com/kamiilbardaq/dither-darkroom.git
+git clone https://github.com/slkass/dither-darkroom.git
 cd dither-darkroom
 npm ci
 npm run dev

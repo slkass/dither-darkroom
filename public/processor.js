@@ -14,6 +14,8 @@ function processImage(input,s){
   const {width,height,pixels}=input,data=pixels.data,output=new ImageData(width,height),out=output.data;
   const light=rgb(s.color),background=rgb(s.background);
   const ink=[light[0]*.529,light[1]*.432,light[2]*.957],floor=[light[0]*.449,light[1]*.398,light[2]*.567];
+  const layered=s.pattern==='tonal';
+  const palette=[background,ink.map(c=>c*.6),floor,light];
   const size=Math.max(.5,s.cell*Math.max(width,height)/1200),contrast=s.contrast/100,gamma=1-s.lift/100,mix=s.texture/100,brightness=s.brightness/100,fadeStart=s.start/100;
   const tones=new Float32Array(width*height);
   for(let p=0,i=0;p<tones.length;p++,i+=4){let g=(.2126*data[i]+.7152*data[i+1]+.0722*data[i+2])/255;g=Math.pow(clamp((g-.012)/.988),gamma);tones[p]=clamp((g-.5)*contrast+.5);}
@@ -24,7 +26,11 @@ function processImage(input,s){
       const p=y*width+x,i=p*4;let g=tones[p];
       const neighbors=(tones[y*width+Math.max(0,x-radius)]+tones[y*width+Math.min(width-1,x+radius)]+tones[Math.max(0,y-radius)*width+x]+tones[Math.min(height-1,y+radius)*width+x])/4;
       g=clamp(g+.3*(g-neighbors));const threshold=(BAYER[by+Math.floor(x/size)%4]+.5)/16,active=.025+(s.coverage/100-.025)*g>threshold;
-      for(let c=0;c<3;c++){const low=background[c]*(1-g*g)+floor[c]*g*g,high=ink[c]+(light[c]-ink[c])*g,continuous=background[c]+(light[c]-background[c])*g*.72;out[i+c]=clamp(((active?high:low)*mix+continuous*(1-mix))*gain,0,255);}out[i+3]=255;
+      // Use the full 0..1 Bayer phase in each tonal band. Above half coverage,
+      // square samples join into upright crosses, then leave square holes.
+      // The legacy binary mode capped at 50% could never show those phases.
+      const q=g*(2+s.coverage/100),base=Math.floor(q),level=Math.min(3,base+(q-base>threshold?1:0));
+      for(let c=0;c<3;c++){const low=background[c]*(1-g*g)+floor[c]*g*g,high=ink[c]+(light[c]-ink[c])*g,continuous=background[c]+(light[c]-background[c])*g*.72,screen=layered?palette[level][c]:(active?high:low);out[i+c]=clamp((screen*mix+continuous*(1-mix))*gain,0,255);}out[i+3]=255;
     }
   }
   const canvas=new OffscreenCanvas(width,height);canvas.getContext('2d').putImageData(output,0,0);return canvas;
